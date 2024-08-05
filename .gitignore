@@ -1,4 +1,5 @@
 .idea/
+.secret
 
 __pycache__/
 

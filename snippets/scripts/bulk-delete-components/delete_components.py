@@ -4,6 +4,7 @@
 ##
 
 import base64
+
 import requests
 
 dry_run = True
@@ -12,7 +13,7 @@ url = "https://api.atlassian.com/graphql"
 api_token = "your-api-token"
 email = "your-email"
 auth_header = f"{email}:{api_token}"
-encoded_auth_header = base64.b64encode(auth_header.encode('utf-8')).decode('utf-8')
+encoded_auth_header = base64.b64encode(auth_header.encode("utf-8")).decode("utf-8")
 headers = {
     "Content-Type": "application/json",
     "Accept": "application/json",
@@ -26,7 +27,7 @@ headers = {
 #     # Add more component IDs as needed
 # ]
 filename = "component_ids.txt"
-with open(filename, 'r') as f:
+with open(filename, "r") as f:
     component_ids = [line.strip() for line in f.readlines()]
 
 # GraphQL mutation template
@@ -57,8 +58,18 @@ for component_id in component_ids:
 
         # Handle the response as needed
         data = response.json()
-        deleted_component_id = data.get("data", {}).get("compass", {}).get("deleteComponent", {}).get("deletedComponentId")
-        errors = data.get("data", {}).get("compass", {}).get("deleteComponent", {}).get("errors")
+        deleted_component_id = (
+            data.get("data", {})
+            .get("compass", {})
+            .get("deleteComponent", {})
+            .get("deletedComponentId")
+        )
+        errors = (
+            data.get("data", {})
+            .get("compass", {})
+            .get("deleteComponent", {})
+            .get("errors")
+        )
 
         if deleted_component_id:
             print(f"Component with ID {deleted_component_id} deleted successfully")
@@ -66,7 +77,11 @@ for component_id in component_ids:
         else:
             print(f"Failed to delete component with ID {component_id}")
             if errors:
-              for error in errors:
-                print(f"Error message: {error.get('message')} Status code: {error.get('extensions', {}).get('statusCode')}")
+                for error in errors:
+                    print(
+                        f"Error message: {error.get('message')} Status code: {error.get('extensions', {}).get('statusCode')}"
+                    )
 
-print(f"Number of components { 'to be deleted' if dry_run else 'deleted' }: {components_deleted}, dry_run: {dry_run}")
+print(
+    f"Number of components { 'to be deleted' if dry_run else 'deleted' }: {components_deleted}, dry_run: {dry_run}"
+)

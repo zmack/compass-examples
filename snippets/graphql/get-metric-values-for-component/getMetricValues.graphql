@@ -1,4 +1,4 @@
-query getAMetricValue($componentID) {
+query getAMetricValue($componentID: ID!) {
   compass {
     component(id: $componentID) {
       ... on CompassComponent {
