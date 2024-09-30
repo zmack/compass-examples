@@ -1,10 +1,10 @@
+import argparse
 import json
 import os
 import sys
 from dataclasses import dataclass
-from pathlib import Path
 from pprint import pp
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 from graphql import (
@@ -13,10 +13,7 @@ from graphql import (
     OperationDefinitionNode,
     TypeNode,
     VariableDefinitionNode,
-    build_ast_schema,
-    graphql_sync,
     parse,
-    print_schema,
 )
 from graphql.language.ast import DocumentNode, NamedTypeNode
 from jsonschema import validate
@@ -73,7 +70,6 @@ class Snippet:
         schema = self._operation_input_json_schema(parsed)
         self.schema = schema
         self.operation_name = self._get_operation_name(parsed)
-        print(a)
         self.params = a
 
     def validate(self, arguments: object) -> Optional[List[str]]:
@@ -233,7 +229,6 @@ class Client:
 
 
 snippets = get_snippet_list()
-params = json.loads(sys.argv[1])
 
 for snippet in snippets:
     snippet.run()
@@ -258,25 +253,46 @@ if url is None:
     print("ATL_URL not set")
     exit(1)
 
-# response = get_type_shape("AddPolarisColumnInput", username, password, url)
-# pp(response.json())
-# pp(response.json())
 
-snippet = next(
-    (
-        snippet
-        for snippet in snippets
-        if snippet.name == "get-metric-values-for-component"
-    ),
-    None,
-)
+def list_snippets():
+    for s in snippets:
+        print(s.name)
 
-if snippet is None:
-    exit(1)
 
-snippet.run(params)
+def run_specific_snippet(snippet_name, arguments_json):
+    params = json.loads(arguments_json)
+    snippet = next((s for s in snippets if s.name == snippet_name), None)
+    if snippet:
+        input_type = snippet.schema["properties"]["input"]["type"]
+        print(f"Input type: {input_type}")
+        pp(get_type_shape(input_type, username, password, url).json())
+        pp(get_type_shape("CompassExternalMetricSourceConfigurationInput", username, password, url).json())
+        snippet.run(params)
+    else:
+        print(f"Snippet '{snippet_name}' not found")
 
-print(snippet)
-print(sys.argv[1])
-response = run_snippet(snippet, url, username, password)
-print(response.json())
+
+def main():
+    parser = argparse.ArgumentParser(description="A Compass snippet runner")
+    subparsers = parser.add_subparsers(dest="subcommand", help="Subcommands")
+
+    # List subcommand
+    subparsers.add_parser("list", help="List available snippets")
+
+    # Run subcommand
+    parser_run = subparsers.add_parser("run", help="Run a specific snippet")
+    parser_run.add_argument("snippet", help="The snippet to run")
+    parser_run.add_argument("arguments", nargs=1, help="JSON-formatted arguments for the snippet")
+
+    args = parser.parse_args()
+
+    if args.subcommand == "list":
+        list_snippets()
+    elif args.subcommand == "run":
+        run_specific_snippet(args.snippet, args.arguments[0])
+    else:
+        parser.print_help()
+
+
+if __name__ == "__main__":
+    main()
