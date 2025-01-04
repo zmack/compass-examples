@@ -15,8 +15,60 @@ from graphql import (
     parse,
 )
 from graphql.language.ast import DocumentNode, NamedTypeNode
-from jsonschema import validate, Draft4Validator
+from jsonschema import Draft4Validator
 from requests.models import HTTPBasicAuth
+
+
+class Client:
+    def __init__(self, url, username, password) -> None:
+        self.url = url
+        self.username = username
+        self.password = password
+
+    def get_type_shape(self, type: str) -> dict:
+        data = """query GetTypeInput($type: String!) {
+        __type(name: $type) {
+            __typename
+            inputFields {
+                name
+                type {
+                    kind
+                    name
+                    ofType {
+                    name
+                    }
+                }
+            }
+            fields {
+                name
+                type {
+                    kind
+                    name
+                    ofType {
+                    name
+                    }
+                }
+            }
+            enumValues {
+                name
+                description
+            }
+        }
+        }"""
+
+        payload = {
+            "query": data,
+            "variables": {"type": type},
+            "operationName": "GetTypeInput",
+        }
+
+        response = requests.post(
+            url=self.url,
+            json=payload,
+            auth=HTTPBasicAuth(self.username, self.password),
+        )
+
+        return response.json()
 
 
 def get_type_shape(
@@ -67,10 +119,189 @@ def get_type_shape(
     return response
 
 
+class SnippetInputSchemaGenerator:
+    def __init__(self, snippet: "Snippet", document: DocumentNode, client: Client):
+        self.snippet = snippet
+        self.document = document
+        self.type_definitions = {}
+        self.undefined_types = set()
+        self.client = client
+
+    def generate_schema(self) -> dict:
+        self.schema = self._operation_input_json_schema()
+        pp(self.schema)
+        return self.schema
+
+    def get_type_shape(self, type: str):
+        return self.client.get_type_shape(type)
+
+    def build_definitions(self, input_type, introspection_data: dict) -> dict:
+        types, definitions = self.introspection_to_jsonschema_definition(
+            introspection_data
+        )
+        definitions_by_name = {input_type: definitions}
+        builtins = ["String"]
+        for type in types:
+            if type is None:
+                continue
+            shape = self.get_type_shape(type)
+            print(f"Getting definition for {type}")
+            more_types, definition = self.introspection_to_jsonschema_definition(shape)
+            definitions_by_name[type] = definition
+            types.extend(
+                [t for t in more_types if t not in types and t not in builtins]
+            )
+
+        return definitions_by_name
+
+    def _operation_input_json_schema(self) -> Dict[Any, Any]:
+        properties: Dict[str, str] = dict()
+        required: List[str] = []
+
+        for definition in self.document.definitions:
+            if not isinstance(definition, OperationDefinitionNode):
+                continue
+
+            for variable in definition.variable_definitions:
+                variable_name = variable.variable.name.value
+                type_schema = self._type_to_json_schema_object(variable.type)
+                if type_schema.get("required") == True:
+                    required.append(variable_name)
+                    del type_schema["required"]
+                properties[variable_name] = type_schema
+
+        return {
+            "$schema": "http://json-schema.org/draft-04/schema#",
+            "type": "object",
+            "properties": properties,
+            "required": required,
+            "definitions": self._get_type_definitions(),
+        }
+
+    def _get_type_definitions(self) -> dict:
+        print(self.undefined_types)
+        for undefined_type in self.undefined_types:
+            shape = self.get_type_shape(undefined_type)
+            pp(shape)
+            self.type_definitions.update(self.build_definitions(undefined_type, shape))
+
+        return self.type_definitions
+
+    def _type_to_json_schema_object(self, node: TypeNode) -> dict:
+        match node:
+            case NamedTypeNode():
+                return self._object_to_json_schema(node)
+            case NonNullTypeNode():
+                schema = self._type_to_json_schema_object(node.type)
+                return {**schema, "required": True}
+            case ListTypeNode():
+                return {
+                    "type": "array",
+                    "items": self._type_to_json_schema_object(node.type),
+                }
+
+    def _object_to_json_schema(self, node: NamedTypeNode) -> dict:
+        match node.name.value:
+            case "ID":
+                return {"type": "string"}
+            case "String":
+                return {"type": "string"}
+            case "Boolean":
+                return {"type": "boolean"}
+            case "Integer":
+                return {"type": "integer"}
+            case _:
+                self.undefined_types.add(node.name.value)
+                return {"type": "object", "$ref": f"#/definitions/{node.name.value}"}
+
+    def introspection_to_jsonschema_definition(
+        self, introspection_data: dict
+    ) -> Tuple[List[str], dict]:
+        """
+        Convert GraphQL introspection data to a JSON Schema definition
+        """
+        type_mapping = {
+            "String": {"type": "string"},
+            "Int": {"type": "integer"},
+            "Float": {"type": "number"},
+            "Boolean": {"type": "boolean"},
+            "ID": {"type": "string"},
+        }
+
+        def convert_field_type(field_type) -> Tuple[List[str], dict]:
+            unknown_types = []
+            if field_type["name"] in type_mapping.keys():
+                return [], type_mapping[field_type["name"]]
+
+            kind = field_type["kind"]
+
+            if kind == "SCALAR":
+                return unknown_types, type_mapping.get(
+                    field_type["name"], {"type": "string"}
+                )
+
+            elif kind == "NON_NULL":
+                # For NON_NULL, we process the ofType and pass along unknown types
+                child_unknown_types, type_definition = convert_field_type(
+                    field_type["ofType"]
+                )
+                unknown_types.extend(child_unknown_types)
+                return unknown_types, type_definition
+
+            elif kind == "LIST":
+                ofType = field_type["ofType"]
+                if ofType["name"] in type_mapping:
+                    return unknown_types, {
+                        "type": "array",
+                        "items": type_mapping[ofType["name"]],
+                    }
+                unknown_types.append(ofType["name"])
+                return unknown_types, {
+                    "type": "array",
+                    "items": {"$ref": f"#/definitions/{ofType['name']}"},
+                }
+
+            elif kind == "INPUT_OBJECT":
+                unknown_types.append(field_type["name"])
+                return unknown_types, {"$ref": f"#/definitions/{field_type['name']}"}
+
+            unknown_types.append(field_type["name"])
+            return unknown_types, {"$ref": f"#/definitions/{field_type['name']}"}
+
+        enums = introspection_data.get("data", {}).get("__type", {}).get("enumValues")
+
+        if enums is not None:
+            enum_values = [ev["name"] for ev in enums]
+            return [], {"type": "string", "enum": enum_values}
+
+        properties = {}
+        required = []
+        unknown_types = []
+
+        for field in introspection_data["data"]["__type"]["inputFields"]:
+            field_name = field["name"]
+            field_type = field["type"]
+
+            types, type_definition = convert_field_type(field_type)
+            unknown_types.extend(types)
+            properties[field_name] = type_definition
+
+        definition = {"type": "object", "properties": properties}
+
+        if required:
+            definition["required"] = required
+
+        # Remove duplicates from unknown_types
+        unknown_types = list(set(unknown_types))
+
+        return unknown_types, definition
+
+
 @dataclass
 class Snippet:
     name: str
     path: str
+    client: "Client"
     arguments: Optional[List[str]] = None
 
     def parse(self) -> Optional[OperationDefinitionNode]:
@@ -80,7 +311,7 @@ class Snippet:
 
         parsed = parse(self.content)
         a = self._unwrap(parsed)
-        self.schema = self._operation_input_json_schema(parsed)
+        self.schema_generator = SnippetInputSchemaGenerator(self, parsed, client)
         self.operation_name = self._get_operation_name(parsed)
         self.params = a
 
@@ -88,21 +319,20 @@ class Snippet:
         print("====={arguments}=====")
         print(arguments)
         print("====={Schema}=====")
-        pp(self.schema)
-        validator = Draft4Validator(self.schema)
+        schema = self.schema_generator.generate_schema()
+        validator = Draft4Validator(schema)
         print(validator.validate(arguments))
 
     def run(self, arguments: Optional[object] = None):
         self.parse()
 
-        print(f"Hello {arguments}")
         if arguments is not None:
-            print("Hiya")
-            input_type = self.schema["properties"]["query"]["type"]
-            self.schema["properties"]["query"] = {
-                "$ref": f"#/definitions/{input_type}"
-            }
-            self.validate_schema(input_type)
+            print(f"Arguments -> {arguments}")
+            self.schema_generator.generate_schema()
+            # print(self.schema)
+            # input_type = self.schema["properties"]["query"]["type"]
+            # self.schema["properties"]["query"] = {"$ref": f"#/definitions/{input_type}"}
+            # self.validate_schema(input_type)
             self.validate(arguments)
 
     def validate_schema(self, input_type):
@@ -135,29 +365,6 @@ class Snippet:
             if definition.name is not None:
                 return definition.name.value
 
-    def _operation_input_json_schema(self, document: DocumentNode) -> Dict[Any, Any]:
-        properties: Dict[str, str] = dict()
-        required: List[str] = []
-
-        for definition in document.definitions:
-            if not isinstance(definition, OperationDefinitionNode):
-                continue
-
-            for variable in definition.variable_definitions:
-                variable_name = variable.variable.name.value
-                type_schema = self._type_to_json_schema_object(variable.type)
-                if type_schema.get("required") == True:
-                    required.append(variable_name)
-                    del type_schema["required"]
-                properties[variable_name] = type_schema
-
-        return {
-            "$schema": "http://json-schema.org/draft-04/schema#",
-            "type": "object",
-            "properties": properties,
-            "required": required,
-        }
-
     def _unwrap(self, document: DocumentNode) -> Dict[str, str]:
         a: Dict[str, str] = dict()
 
@@ -186,32 +393,6 @@ class Snippet:
             case NonNullTypeNode():
                 return f"{self._type_to_schema(node.type)}!"
 
-    def _type_to_json_schema_object(self, node: TypeNode) -> dict[Any, Any]:
-        match node:
-            case NamedTypeNode():
-                return {"type": self._object_to_json_schema(node)}
-            case NonNullTypeNode():
-                schema = self._type_to_json_schema_object(node.type)
-                return {**schema, "required": True}
-            case ListTypeNode():
-                return {
-                    "type": "array",
-                    "items": self._type_to_json_schema_object(node.type),
-                }
-
-    def _object_to_json_schema(self, node: NamedTypeNode) -> str:
-        match node.name.value:
-            case "ID":
-                return "string"
-            case "String":
-                return "string"
-            case "Boolean":
-                return "boolean"
-            case "Integer":
-                return "integer"
-            case _:
-                return node.name.value
-
 
 def pnd(obj: object) -> None:
     print([method for method in obj.__dir__() if not method.startswith("__")])
@@ -225,10 +406,16 @@ def list_files_in_directory(directory):
     return files
 
 
-def get_snippet_list(path: str = os.path.dirname(__file__)) -> List[Snippet]:
+def get_snippet_list(
+    client: Client, path: str = os.path.dirname(__file__)
+) -> List[Snippet]:
     current_dir = path
     snippets = [
-        Snippet(name=snippet_name, path=os.path.join(current_dir, snippet_name))
+        Snippet(
+            name=snippet_name,
+            path=os.path.join(current_dir, snippet_name),
+            client=client,
+        )
         for snippet_name in list_files_in_directory(current_dir)
     ]
     return snippets
@@ -254,25 +441,15 @@ def run_snippet(
     return response
 
 
-class Client:
-    def __init__(self, url, username, password) -> None:
-        self.url = url
-        self.username = username
-        self.password = password
-
-
-snippets = get_snippet_list()
-
-for snippet in snippets:
-    snippet.run()
-
 username = os.getenv("ATL_USERNAME")
 password = os.getenv("ATL_PASSWORD")
 url = os.getenv("ATL_URL")
 
+client = Client(url, username, password)
+snippets = get_snippet_list(client)
 
-session = requests.Session()
-session.headers.update({})
+for snippet in snippets:
+    snippet.run()
 
 if username is None:
     print("ATL_USERNAME not set")
@@ -302,14 +479,14 @@ def run_specific_snippet(snippet_name, arguments_json):
     else:
         print(f"Snippet '{snippet_name}' not found")
 
+
 def build_definitions(input_type, introspection_data: dict) -> dict:
     types, definitions = introspection_to_jsonschema_definition(introspection_data)
-    definitions_by_name = {
-        input_type: definitions
-    }
+    definitions_by_name = {input_type: definitions}
     builtins = ["String"]
     for type in types:
         shape = get_type_shape(type, username, password, url).json()
+        print(f"Getting definition for {type}")
         more_types, definition = introspection_to_jsonschema_definition(shape)
         definitions_by_name[type] = definition
         types.extend([t for t in more_types if t not in types and t not in builtins])
@@ -317,80 +494,82 @@ def build_definitions(input_type, introspection_data: dict) -> dict:
     return definitions_by_name
 
 
-def introspection_to_jsonschema_definition(introspection_data: dict) -> Tuple[List[str], dict]:
+def introspection_to_jsonschema_definition(
+    introspection_data: dict,
+) -> Tuple[List[str], dict]:
     """
     Convert GraphQL introspection data to a JSON Schema definition
     """
     type_mapping = {
-        'String': {'type': 'string'},
-        'Int': {'type': 'integer'},
-        'Float': {'type': 'number'},
-        'Boolean': {'type': 'boolean'},
-        'ID': {'type': 'string'}
+        "String": {"type": "string"},
+        "Int": {"type": "integer"},
+        "Float": {"type": "number"},
+        "Boolean": {"type": "boolean"},
+        "ID": {"type": "string"},
     }
 
     def convert_field_type(field_type) -> Tuple[List[str], dict]:
         unknown_types = []
-        if field_type['name'] in type_mapping.keys():
-                   return [], type_mapping[field_type['name']]
+        if field_type["name"] in type_mapping.keys():
+            return [], type_mapping[field_type["name"]]
 
-        kind = field_type['kind']
+        kind = field_type["kind"]
 
-        if kind == 'SCALAR':
-            return unknown_types, type_mapping.get(field_type['name'], {'type': 'string'})
+        if kind == "SCALAR":
+            return unknown_types, type_mapping.get(
+                field_type["name"], {"type": "string"}
+            )
 
-        elif kind == 'NON_NULL':
+        elif kind == "NON_NULL":
             # For NON_NULL, we process the ofType and pass along unknown types
-            child_unknown_types, type_definition = convert_field_type(field_type['ofType'])
+            child_unknown_types, type_definition = convert_field_type(
+                field_type["ofType"]
+            )
             unknown_types.extend(child_unknown_types)
             return unknown_types, type_definition
 
-        elif kind == 'LIST':
-            ofType = field_type['ofType']
-            if ofType['name'] in type_mapping:
+        elif kind == "LIST":
+            ofType = field_type["ofType"]
+            if ofType["name"] in type_mapping:
                 return unknown_types, {
-                    'type': 'array',
-                    'items': type_mapping[ofType['name']]
+                    "type": "array",
+                    "items": type_mapping[ofType["name"]],
                 }
-            unknown_types.append(ofType['name'])
+            unknown_types.append(ofType["name"])
             return unknown_types, {
-                'type': 'array',
-                'items': {'$ref': f"#/definitions/{ofType['name']}"}
+                "type": "array",
+                "items": {"$ref": f"#/definitions/{ofType['name']}"},
             }
 
-        elif kind == 'INPUT_OBJECT':
-            unknown_types.append(field_type['name'])
-            return unknown_types, {'$ref': f"#/definitions/{field_type['name']}"}
+        elif kind == "INPUT_OBJECT":
+            unknown_types.append(field_type["name"])
+            return unknown_types, {"$ref": f"#/definitions/{field_type['name']}"}
 
-        unknown_types.append(field_type['name'])
-        return unknown_types, {'$ref': f"#/definitions/{field_type['name']}"}
+        unknown_types.append(field_type["name"])
+        return unknown_types, {"$ref": f"#/definitions/{field_type['name']}"}
 
-    if introspection_data['data']['__type'].get('enumValues'):
-            enum_values = [ev['name'] for ev in introspection_data['data']['__type']['enumValues']]
-            return [], {
-                'type': 'string',
-                'enum': enum_values
-            }
+    if introspection_data["data"]["__type"].get("enumValues"):
+        enum_values = [
+            ev["name"] for ev in introspection_data["data"]["__type"]["enumValues"]
+        ]
+        return [], {"type": "string", "enum": enum_values}
 
     properties = {}
     required = []
     unknown_types = []
 
-    for field in introspection_data['data']['__type']['inputFields']:
-        field_name = field['name']
-        field_type = field['type']
+    for field in introspection_data["data"]["__type"]["inputFields"]:
+        field_name = field["name"]
+        field_type = field["type"]
 
         types, type_definition = convert_field_type(field_type)
         unknown_types.extend(types)
         properties[field_name] = type_definition
 
-    definition = {
-        'type': 'object',
-        'properties': properties
-    }
+    definition = {"type": "object", "properties": properties}
 
     if required:
-        definition['required'] = required
+        definition["required"] = required
 
     # Remove duplicates from unknown_types
     unknown_types = list(set(unknown_types))
