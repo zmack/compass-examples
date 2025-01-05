@@ -1,14 +1,14 @@
 mutation createWebhook($input: CompassCreateWebhookInput!) {
-  compass {
-    createWebhook(input: $input) {
-      success
-      webhookDetails {
-        id
-        url
-      }
-      errors {
-        ...CommonMutationError
-      }
+    compass {
+        createWebhook(input: $input) {
+            success
+            webhookDetails {
+                id
+                url
+            }
+            errors {
+                message
+            }
+        }
     }
-  }
 }

@@ -1,8 +1,10 @@
 import argparse
 import json
 import os
+from rich.console import Console
+from rich.syntax import Syntax
 from dataclasses import dataclass
-from pprint import pp
+from pprint import pp, pformat
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -233,7 +235,7 @@ class SnippetInputSchemaGenerator:
             if field_type["name"] in type_mapping.keys():
                 return [], type_mapping[field_type["name"]]
 
-            kind = field_type["kind"]
+            kind = field_type.get("kind", None)
 
             if kind == "SCALAR":
                 return unknown_types, type_mapping.get(
@@ -262,6 +264,9 @@ class SnippetInputSchemaGenerator:
                 }
 
             elif kind == "INPUT_OBJECT":
+                unknown_types.append(field_type["name"])
+                return unknown_types, {"$ref": f"#/definitions/{field_type['name']}"}
+            elif kind is None:
                 unknown_types.append(field_type["name"])
                 return unknown_types, {"$ref": f"#/definitions/{field_type['name']}"}
 
@@ -315,11 +320,11 @@ class Snippet:
         self.operation_name = self._get_operation_name(parsed)
         self.params = a
 
+    def generate_validation_schema(self) -> dict:
+        return self.schema_generator.generate_schema()
+
     def validate(self, arguments: object) -> Optional[List[str]]:
-        print("====={arguments}=====")
-        print(arguments)
-        print("====={Schema}=====")
-        schema = self.schema_generator.generate_schema()
+        schema = self.generate_validation_schema()
         validator = Draft4Validator(schema)
         print(validator.validate(arguments))
 
@@ -327,8 +332,6 @@ class Snippet:
         self.parse()
 
         if arguments is not None:
-            print(f"Arguments -> {arguments}")
-            self.schema_generator.generate_schema()
             # print(self.schema)
             # input_type = self.schema["properties"]["query"]["type"]
             # self.schema["properties"]["query"] = {"$ref": f"#/definitions/{input_type}"}
@@ -435,6 +438,7 @@ def run_snippet(
     response = requests.post(
         url=url,
         json=payload,
+        headers={"X-ExperimentalApi": "compass-prototype"},
         auth=HTTPBasicAuth(username, password),
     )
 
@@ -475,106 +479,24 @@ def run_specific_snippet(snippet_name, arguments_json):
     if snippet:
         snippet.run(params)
         response = run_snippet(snippet, url, username, password, params)
-        print(response.json())
+        pretty_print(response.json())
     else:
         print(f"Snippet '{snippet_name}' not found")
 
 
-def build_definitions(input_type, introspection_data: dict) -> dict:
-    types, definitions = introspection_to_jsonschema_definition(introspection_data)
-    definitions_by_name = {input_type: definitions}
-    builtins = ["String"]
-    for type in types:
-        shape = get_type_shape(type, username, password, url).json()
-        print(f"Getting definition for {type}")
-        more_types, definition = introspection_to_jsonschema_definition(shape)
-        definitions_by_name[type] = definition
-        types.extend([t for t in more_types if t not in types and t not in builtins])
-
-    return definitions_by_name
+def pretty_print(data: dict):
+    syntax = Syntax(
+        json.dumps(data, indent=4),
+        "json",
+        theme="monokai",
+        line_numbers=True,
+    )
+    console = Console()
+    console.print(syntax)
 
 
-def introspection_to_jsonschema_definition(
-    introspection_data: dict,
-) -> Tuple[List[str], dict]:
-    """
-    Convert GraphQL introspection data to a JSON Schema definition
-    """
-    type_mapping = {
-        "String": {"type": "string"},
-        "Int": {"type": "integer"},
-        "Float": {"type": "number"},
-        "Boolean": {"type": "boolean"},
-        "ID": {"type": "string"},
-    }
-
-    def convert_field_type(field_type) -> Tuple[List[str], dict]:
-        unknown_types = []
-        if field_type["name"] in type_mapping.keys():
-            return [], type_mapping[field_type["name"]]
-
-        kind = field_type["kind"]
-
-        if kind == "SCALAR":
-            return unknown_types, type_mapping.get(
-                field_type["name"], {"type": "string"}
-            )
-
-        elif kind == "NON_NULL":
-            # For NON_NULL, we process the ofType and pass along unknown types
-            child_unknown_types, type_definition = convert_field_type(
-                field_type["ofType"]
-            )
-            unknown_types.extend(child_unknown_types)
-            return unknown_types, type_definition
-
-        elif kind == "LIST":
-            ofType = field_type["ofType"]
-            if ofType["name"] in type_mapping:
-                return unknown_types, {
-                    "type": "array",
-                    "items": type_mapping[ofType["name"]],
-                }
-            unknown_types.append(ofType["name"])
-            return unknown_types, {
-                "type": "array",
-                "items": {"$ref": f"#/definitions/{ofType['name']}"},
-            }
-
-        elif kind == "INPUT_OBJECT":
-            unknown_types.append(field_type["name"])
-            return unknown_types, {"$ref": f"#/definitions/{field_type['name']}"}
-
-        unknown_types.append(field_type["name"])
-        return unknown_types, {"$ref": f"#/definitions/{field_type['name']}"}
-
-    if introspection_data["data"]["__type"].get("enumValues"):
-        enum_values = [
-            ev["name"] for ev in introspection_data["data"]["__type"]["enumValues"]
-        ]
-        return [], {"type": "string", "enum": enum_values}
-
-    properties = {}
-    required = []
-    unknown_types = []
-
-    for field in introspection_data["data"]["__type"]["inputFields"]:
-        field_name = field["name"]
-        field_type = field["type"]
-
-        types, type_definition = convert_field_type(field_type)
-        unknown_types.extend(types)
-        properties[field_name] = type_definition
-
-    definition = {"type": "object", "properties": properties}
-
-    if required:
-        definition["required"] = required
-
-    # Remove duplicates from unknown_types
-    unknown_types = list(set(unknown_types))
-
-    return unknown_types, definition
+def get_snippet(snippet_name) -> Optional[Snippet]:
+    return next((s for s in snippets if s.name == snippet_name), None)
 
 
 def main():
@@ -591,12 +513,21 @@ def main():
         "arguments", nargs=1, help="JSON-formatted arguments for the snippet"
     )
 
+    parser_peek = subparsers.add_parser(
+        "peek", help="Display the validation schema for arguments passed to a snippet"
+    )
+    parser_peek.add_argument("snippet", help="The snippet to display")
+
     args = parser.parse_args()
 
     if args.subcommand == "list":
         list_snippets()
     elif args.subcommand == "run":
         run_specific_snippet(args.snippet, args.arguments[0])
+    elif args.subcommand == "peek":
+        snippet = get_snippet(args.snippet)
+        if snippet is not None:
+            pretty_print(snippet.generate_validation_schema())
     else:
         parser.print_help()
 
