@@ -38,6 +38,7 @@ snippet-runner run <snippet_name> '{"arg1": "value1"}'
 
 2. As a Python module:
 ```bash
+# From the scripts directory
 python -m snippet_runner list
 python -m snippet_runner peek <snippet_name>
 python -m snippet_runner run <snippet_name> '{"arg1": "value1"}'
