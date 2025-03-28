@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import sys
 from rich.console import Console
 from rich.syntax import Syntax
 from dataclasses import dataclass
@@ -22,45 +23,62 @@ from requests.models import HTTPBasicAuth
 
 
 class Client:
-    def __init__(self, url, username, password) -> None:
+    def __init__(self, url: str, username: str, password: str) -> None:
+        if not url:
+            raise ValueError("URL is required")
+        if not username:
+            raise ValueError("Username is required")
+        if not password:
+            raise ValueError("Password is required")
+
         self.url = url
         self.username = username
         self.password = password
 
-    def get_type_shape(self, type: str) -> dict:
-        data = """query GetTypeInput($type: String!) {
-        __type(name: $type) {
-            __typename
-            inputFields {
-                name
-                type {
-                    kind
+    def get_type_shape(self, type_name: str) -> dict:
+        """
+        Fetch GraphQL type information using introspection.
+
+        Args:
+            type_name: Name of the GraphQL type to introspect
+
+        Returns:
+            dict: The introspection response for the type
+        """
+        query = """
+        query GetTypeInput($type: String!) {
+            __type(name: $type) {
+                __typename
+                inputFields {
                     name
-                    ofType {
-                    name
+                    type {
+                        kind
+                        name
+                        ofType {
+                            name
+                        }
                     }
                 }
-            }
-            fields {
-                name
-                type {
-                    kind
+                fields {
                     name
-                    ofType {
-                    name
+                    type {
+                        kind
+                        name
+                        ofType {
+                            name
+                        }
                     }
                 }
+                enumValues {
+                    name
+                    description
+                }
             }
-            enumValues {
-                name
-                description
-            }
-        }
         }"""
 
         payload = {
-            "query": data,
-            "variables": {"type": type},
+            "query": query,
+            "variables": {"type": type_name},
             "operationName": "GetTypeInput",
         }
 
@@ -69,56 +87,8 @@ class Client:
             json=payload,
             auth=HTTPBasicAuth(self.username, self.password),
         )
-
+        response.raise_for_status()
         return response.json()
-
-
-def get_type_shape(
-    type: str, username: str, password: str, url: str
-) -> requests.Response:
-    data = """query GetTypeInput($type: String!) {
-    __type(name: $type) {
-        __typename
-        inputFields {
-            name
-            type {
-                kind
-                name
-                ofType {
-                name
-                }
-            }
-        }
-        fields {
-            name
-            type {
-                kind
-                name
-                ofType {
-                name
-                }
-            }
-        }
-        enumValues {
-            name
-            description
-        }
-    }
-    }"""
-
-    payload = {
-        "query": data,
-        "variables": {"type": type},
-        "operationName": "GetTypeInput",
-    }
-
-    response = requests.post(
-        url=url,
-        json=payload,
-        auth=HTTPBasicAuth(username, password),
-    )
-
-    return response
 
 
 class SnippetInputSchemaGenerator:
@@ -131,7 +101,6 @@ class SnippetInputSchemaGenerator:
 
     def generate_schema(self) -> dict:
         self.schema = self._operation_input_json_schema()
-        pp(self.schema)
         return self.schema
 
     def get_type_shape(self, type: str):
@@ -181,10 +150,8 @@ class SnippetInputSchemaGenerator:
         }
 
     def _get_type_definitions(self) -> dict:
-        print(self.undefined_types)
         for undefined_type in self.undefined_types:
             shape = self.get_type_shape(undefined_type)
-            pp(shape)
             self.type_definitions.update(self.build_definitions(undefined_type, shape))
 
         return self.type_definitions
@@ -306,7 +273,7 @@ class SnippetInputSchemaGenerator:
 class Snippet:
     name: str
     path: str
-    client: "Client"
+    client: Client
     arguments: Optional[List[str]] = None
 
     def parse(self) -> Optional[OperationDefinitionNode]:
@@ -316,7 +283,7 @@ class Snippet:
 
         parsed = parse(self.content)
         a = self._unwrap(parsed)
-        self.schema_generator = SnippetInputSchemaGenerator(self, parsed, client)
+        self.schema_generator = SnippetInputSchemaGenerator(self, parsed, self.client)
         self.operation_name = self._get_operation_name(parsed)
         self.params = a
 
@@ -332,17 +299,7 @@ class Snippet:
         self.parse()
 
         if arguments is not None:
-            # print(self.schema)
-            # input_type = self.schema["properties"]["query"]["type"]
-            # self.schema["properties"]["query"] = {"$ref": f"#/definitions/{input_type}"}
-            # self.validate_schema(input_type)
             self.validate(arguments)
-
-    def validate_schema(self, input_type):
-        shape = get_type_shape(input_type, username, password, url).json()
-        print(f"Input type: {input_type}")
-        definitions = build_definitions(input_type, shape)
-        self.schema["definitions"] = definitions
 
     def _read_content(self) -> Optional[str]:
         path = self._find_graphql_file()
@@ -401,87 +358,128 @@ def pnd(obj: object) -> None:
     print([method for method in obj.__dir__() if not method.startswith("__")])
 
 
-def list_files_in_directory(directory):
-    # Get a list of all files and directories
+def list_files_in_directory(directory: str) -> List[str]:
+    """
+    Get a list of all directories in the specified directory.
+
+    Args:
+        directory: Path to directory to list
+
+    Returns:
+        List of directory names
+    """
     all_items = os.listdir(directory)
-    # Filter out directories, keeping only files
-    files = [f for f in all_items if os.path.isdir(os.path.join(directory, f))]
-    return files
+    # Filter to keep only directories
+    dirs = [f for f in all_items if os.path.isdir(os.path.join(directory, f))]
+    return dirs
 
 
 def get_snippet_list(
     client: Client, path: str = os.path.dirname(__file__)
 ) -> List[Snippet]:
-    current_dir = path
-    snippets = [
+    """
+    Get list of available snippets in the specified directory.
+
+    Args:
+        client: GraphQL client instance
+        path: Directory path containing snippets, defaults to current directory
+
+    Returns:
+        List of Snippet instances
+    """
+    return [
         Snippet(
             name=snippet_name,
-            path=os.path.join(current_dir, snippet_name),
+            path=os.path.join(path, snippet_name),
             client=client,
         )
-        for snippet_name in list_files_in_directory(current_dir)
+        for snippet_name in list_files_in_directory(path)
     ]
-    return snippets
 
 
-def run_snippet(
-    snippet: Snippet, url: str, username: str, password: str, args: dict
-) -> requests.Response:
-    data = snippet.content
+def run_snippet(snippet: Snippet, client: Client, args: dict) -> requests.Response:
+    """
+    Execute a GraphQL snippet.
+
+    Args:
+        snippet: Snippet instance to run
+        client: GraphQL client instance
+        args: Variables to pass to the query
+
+    Returns:
+        Response from the GraphQL server
+    """
+    if not snippet.content:
+        raise ValueError(f"No content found for snippet {snippet.name}")
+
     payload = {
-        "query": data,
+        "query": snippet.content,
         "variables": args,
         "operationName": snippet.operation_name,
     }
-    pp(payload)
 
     response = requests.post(
-        url=url,
+        url=client.url,
         json=payload,
         headers={"X-ExperimentalApi": "compass-prototype"},
-        auth=HTTPBasicAuth(username, password),
+        auth=HTTPBasicAuth(client.username, client.password),
     )
-
+    response.raise_for_status()
     return response
 
 
-username = os.getenv("ATL_USERNAME")
-password = os.getenv("ATL_PASSWORD")
-url = os.getenv("ATL_URL")
+def load_environment() -> Client:
+    """
+    Load environment variables and create client instance.
 
-client = Client(url, username, password)
-snippets = get_snippet_list(client)
+    Returns:
+        Configured Client instance
 
-for snippet in snippets:
-    snippet.run()
+    Raises:
+        EnvironmentError: If required environment variables are missing
+    """
+    username = os.getenv("ATL_USERNAME")
+    password = os.getenv("ATL_PASSWORD")
+    url = os.getenv("ATL_URL")
 
-if username is None:
-    print("ATL_USERNAME not set")
-    exit(1)
-
-if password is None:
-    print("ATL_PASSWORD not set")
-    exit(1)
-
-if url is None:
-    print("ATL_URL not set")
-    exit(1)
+    try:
+        return Client(url, username, password)
+    except ValueError as e:
+        raise EnvironmentError(f"Environment configuration error: {str(e)}")
 
 
-def list_snippets():
-    for s in snippets:
-        print(s.name)
+def run_specific_snippet(
+    snippet_name: str, arguments_json: str, client: Client
+) -> None:
+    """
+    Run a specific snippet with the provided arguments.
 
+    Args:
+        snippet_name: Name of snippet to run
+        arguments_json: JSON string of variables
+        client: GraphQL client instance
+    """
+    try:
+        params = json.loads(arguments_json)
+    except json.JSONDecodeError:
+        print(f"Invalid JSON arguments: {arguments_json}")
+        return
 
-def run_specific_snippet(snippet_name, arguments_json):
-    params = json.loads(arguments_json)
-    snippet = next((s for s in snippets if s.name == snippet_name), None)
-    if snippet:
-        snippet.run(params)
-        response = run_snippet(snippet, url, username, password, params)
-        pretty_print(response.json())
-    else:
+    snippet = next(
+        (s for s in get_snippet_list(client) if s.name == snippet_name), None
+    )
+    if not snippet:
         print(f"Snippet '{snippet_name}' not found")
+        return
+
+    try:
+        snippet.run(params)
+        response = run_snippet(snippet, client, params)
+        pretty_print(response.json())
+    except requests.RequestException as e:
+        print(f"Error executing snippet: {str(e)}")
+    except Exception as e:
+        print(f"Unexpected error: {str(e)}")
 
 
 def pretty_print(data: dict):
@@ -495,11 +493,8 @@ def pretty_print(data: dict):
     console.print(syntax)
 
 
-def get_snippet(snippet_name) -> Optional[Snippet]:
-    return next((s for s in snippets if s.name == snippet_name), None)
-
-
-def main():
+def main() -> None:
+    """Main entry point for the snippet runner CLI."""
     parser = argparse.ArgumentParser(description="A Compass snippet runner")
     subparsers = parser.add_subparsers(dest="subcommand", help="Subcommands")
 
@@ -520,17 +515,32 @@ def main():
 
     args = parser.parse_args()
 
+    try:
+        client = load_environment()
+    except EnvironmentError as e:
+        print(str(e))
+        return 1
+
     if args.subcommand == "list":
-        list_snippets()
+        snippets = get_snippet_list(client)
+        for s in snippets:
+            print(s.name)
     elif args.subcommand == "run":
-        run_specific_snippet(args.snippet, args.arguments[0])
+        run_specific_snippet(args.snippet, args.arguments[0], client)
     elif args.subcommand == "peek":
-        snippet = get_snippet(args.snippet)
-        if snippet is not None:
+        snippets = get_snippet_list(client)
+        snippet = next((s for s in snippets if s.name == args.snippet), None)
+        if snippet:
+            snippet.parse()
             pretty_print(snippet.generate_validation_schema())
+        else:
+            print(f"Snippet '{args.snippet}' not found")
     else:
         parser.print_help()
+        return 1
+
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
