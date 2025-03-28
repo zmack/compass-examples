@@ -30,7 +30,7 @@ MAPPINGS = {
 def load_yaml(file_path):
     """Load a YAML file from the given path."""
     try:
-        with open(file_path, 'r') as file:
+        with open(file_path, "r") as file:
             return yaml.safe_load(file)
     except Exception as e:
         print(f"Error loading YAML file: {e}", file=sys.stderr)
@@ -40,7 +40,7 @@ def load_yaml(file_path):
 def dump_yaml(data, file_path):
     """Dump a YAML file to the given path."""
     try:
-        with open(file_path, 'w') as file:
+        with open(file_path, "w") as file:
             yaml.dump(data, file)
     except Exception as e:
         print(f"Error dumping YAML file: {e}", file=sys.stderr)
@@ -49,10 +49,21 @@ def dump_yaml(data, file_path):
 
 def create_parser():
     """Create an argument parser for the script."""
-    parser = argparse.ArgumentParser(description='Convert Backstage YAML to Compass YAML.')
-    parser.add_argument('input_file_path', type=str, help='Path to the input Backstage YAML file.')
-    parser.add_argument('-o', '--output', type=str, help='Path to the output Compass YAML file.')
-    parser.add_argument('-dry', '--dry-run', action='store_true', help='Run the script without writing any files.')
+    parser = argparse.ArgumentParser(
+        description="Convert Backstage YAML to Compass YAML."
+    )
+    parser.add_argument(
+        "input_file_path", type=str, help="Path to the input Backstage YAML file."
+    )
+    parser.add_argument(
+        "-o", "--output", type=str, help="Path to the output Compass YAML file."
+    )
+    parser.add_argument(
+        "-dry",
+        "--dry-run",
+        action="store_true",
+        help="Run the script without writing any files.",
+    )
     return parser
 
 
@@ -63,15 +74,11 @@ def map_properties(input_data):
         raise ValueError("Invalid input file")
 
     # Start with default config data
-    output_data = {
-        "configVersion": 1,
-        "fields": {},
-        "labels": ["imported:backstage"]
-    }
+    output_data = {"configVersion": 1, "fields": {}, "labels": ["imported:backstage"]}
 
     for input_path, output_info in MAPPINGS.items():
         try:
-            input_value = get_value_from_path(input_data, input_path.split('.'))
+            input_value = get_value_from_path(input_data, input_path.split("."))
 
             if isinstance(output_info, dict):
                 handler_name = output_info.get("handler", None)
@@ -87,9 +94,9 @@ def map_properties(input_data):
                 if input_value is None:
                     continue
 
-                output_path = output_info.get("path", "").split('.')
+                output_path = output_info.get("path", "").split(".")
             else:
-                output_path = output_info.split('.')
+                output_path = output_info.split(".")
 
             set_value_at_path(output_data, output_path, input_value)
         except Exception as e:

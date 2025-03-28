@@ -114,7 +114,7 @@ def get_custom_field(fields, custom_field_name):
         field
         for field in fields
         if (field["name"] == custom_field_name)
-           and (compass_jira_forge_field_key_part in field["key"])
+        and (compass_jira_forge_field_key_part in field["key"])
     ]
     if len(custom_field) > 0:
         formatted_custom_field = IssueCustomFieldMetadata(
@@ -133,7 +133,9 @@ def get_custom_field(fields, custom_field_name):
 
 
 # Get all issues with Compass custom field values, so that we can in the end migration all in once.
-def get_related_issues(domain_name, user_name, api_token, custom_field_custom_id, start_at):
+def get_related_issues(
+    domain_name, user_name, api_token, custom_field_custom_id, start_at
+):
     if IS_ALL_OR_ONE_PROJECT:
         url = (
             domain_name + f"/rest/api/3/search?"
@@ -175,7 +177,7 @@ def get_formatted_issues(issues, custom_field_field_id):
         # We only save the issues with valid value of customField .
         # If the customField value(ari) got deleted/invalid, we will ignore it
         if bool(custom_field_value) and custom_field_value.startswith(
-                compass_components_prefix
+            compass_components_prefix
         ):
             formatted_issues[id] = Issue(id, link, key, custom_field_value, components)
     return formatted_issues
@@ -204,17 +206,27 @@ def get_formatted_components(components):
     return formatted_components
 
 
-def update_issue(domain_name, user_name, api_token, issue_id, ari, existing_components, allowed_components_dict):
+def update_issue(
+    domain_name,
+    user_name,
+    api_token,
+    issue_id,
+    ari,
+    existing_components,
+    allowed_components_dict,
+):
     try:
         component_details = allowed_components_dict[ari]
     except KeyError:
-        print(f"Couldn't copy issueId: {issue_id} issue's Compass custom field value to its Components field because of wrong component {ari}. "
-              f"Please try again later.")
+        print(
+            f"Couldn't copy issueId: {issue_id} issue's Compass custom field value to its Components field because of wrong component {ari}. "
+            f"Please try again later."
+        )
         return
 
     url = (
-            domain_name
-            + f"/rest/api/3/issue/{issue_id}?notifyUsers=false&overrideScreenSecurity=false&overrideEditableFlag=false&returnIssue=true"
+        domain_name
+        + f"/rest/api/3/issue/{issue_id}?notifyUsers=false&overrideScreenSecurity=false&overrideEditableFlag=false&returnIssue=true"
     )
     auth = HTTPBasicAuth(user_name, api_token)
     headers = {"Accept": "application/json", "Content-Type": "application/json"}
@@ -315,7 +327,12 @@ def main():
         for i in range(0, number_loop + 1):
             start_at = i * max_results
             cur_issues = get_related_issues(
-                DOMAIN_NAME, USER_NAME, API_TOKEN, compass_custom_field_customid, start_at)
+                DOMAIN_NAME,
+                USER_NAME,
+                API_TOKEN,
+                compass_custom_field_customid,
+                start_at,
+            )
             cur_formatted_issues_dict = get_formatted_issues(
                 cur_issues["issues"], compass_custom_field_fieldid
             )
@@ -363,7 +380,9 @@ if __name__ == "__main__":
     )
     PREFERENCE_FOR_ALL_OR_ONE_PROJECT = input(preference_prompt).strip()
 
-    IS_ALL_OR_ONE_PROJECT = check_for_migration_preference(PREFERENCE_FOR_ALL_OR_ONE_PROJECT)
+    IS_ALL_OR_ONE_PROJECT = check_for_migration_preference(
+        PREFERENCE_FOR_ALL_OR_ONE_PROJECT
+    )
 
     print("\n")
 

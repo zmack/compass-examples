@@ -52,7 +52,8 @@ def run_specific_snippet(
         return
 
     snippet = next(
-        (s for s in get_snippet_list(client, snippet_path) if s.name == snippet_name), None
+        (s for s in get_snippet_list(client, snippet_path) if s.name == snippet_name),
+        None,
     )
     if not snippet:
         print(f"Snippet '{snippet_name}' not found")

@@ -7,15 +7,18 @@ import pandas as pd
 # Replace with your email, API token, site URL, and Jira project keys
 email = "your-email"
 api_token = "your-api-token"
-site_url = "your-site-url" # desired format: my-cool-site.atlassian.net
-project_keys = ['your-project-key', 'another-project-key'] # List of Jira project keys or IDs to extract from
+site_url = "your-site-url"  # desired format: my-cool-site.atlassian.net
+project_keys = [
+    "your-project-key",
+    "another-project-key",
+]  # List of Jira project keys or IDs to extract from
 
 auth = (email, api_token)
 
 all_data = []
 
 if len(project_keys) > 100:
-    print('Too many projects. Please specify no more than 100 projects.')
+    print("Too many projects. Please specify no more than 100 projects.")
 else:
     # Iterate over the project keys
     for project_key in project_keys:
@@ -33,19 +36,21 @@ else:
             data = response.json()
             for component in data:
                 project_key_value = project_key
-                component_name = component['name']
+                component_name = component["name"]
                 description = f"Jira component from the project {project_key_value}"
 
-                all_data.append({
-                    'name': component_name,
-                    'type': '',
-                    'lifecycle stage': '',
-                    'tier': '',
-                    'description': description,
-                    'labels': '',
-                    'owner team': '',
-                    'repositories': ''
-                })
+                all_data.append(
+                    {
+                        "name": component_name,
+                        "type": "",
+                        "lifecycle stage": "",
+                        "tier": "",
+                        "description": description,
+                        "labels": "",
+                        "owner team": "",
+                        "repositories": "",
+                    }
+                )
                 if len(all_data) == 1000:
                     break
         else:
@@ -56,5 +61,5 @@ else:
 
     # Write the DataFrame to an CSV file
     current_datetime = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-    df.to_csv('output_component_{}.csv'.format(current_datetime), index=False)
-    print('Written to output_component_{}.csv'.format(current_datetime))
+    df.to_csv("output_component_{}.csv".format(current_datetime), index=False)
+    print("Written to output_component_{}.csv".format(current_datetime))

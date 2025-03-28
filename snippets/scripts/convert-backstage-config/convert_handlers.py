@@ -1,6 +1,7 @@
 # Field Handler Functions. For the Compass YAML structure, refer:
 # https://developer.atlassian.com/cloud/compass/config-as-code/structure-and-contents-of-a-compass-yml-file/
 
+
 def handle_name(value):
     """
     Convert the name value from Backstage to Compass format.
@@ -36,7 +37,7 @@ def handle_lifecycle(value):
         "beta": "Pre-Release",
         "production": "Active",
         "deprecated": "Deprecated",
-        "end-of-life": "Deprecated"
+        "end-of-life": "Deprecated",
     }
 
     # Implement your conversion logic here
@@ -60,7 +61,7 @@ def handle_links(values):
         "ci": "DASHBOARD",
         "cd": "DASHBOARD",
         "dashboard": "DASHBOARD",
-        "logs": "DASHBOARD"
+        "logs": "DASHBOARD",
     }
 
     result = []
@@ -71,11 +72,7 @@ def handle_links(values):
         link_name = link.get("title", None)
         link_url = link["url"]
 
-        result.append({
-            "type": link_type,
-            "name": link_name,
-            "url": link_url
-        })
+        result.append({"type": link_type, "name": link_name, "url": link_url})
 
     return result
 
@@ -108,7 +105,7 @@ def handle_type(value):
         "service": "SERVICE",
         "website": "WEBSITE",
         "library": "LIBRARY",
-        "sdk": "LIBRARY"
+        "sdk": "LIBRARY",
     }
 
     # Implement your conversion logic here if needed

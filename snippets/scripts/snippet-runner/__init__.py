@@ -8,10 +8,10 @@ __version__ = "0.1.0"
 __author__ = "Compass Team"
 
 __all__ = [
-    'Client',
-    'Snippet',
-    'SnippetInputSchemaGenerator',
-    'get_snippet_list',
-    'run_snippet',
-    'pretty_print',
+    "Client",
+    "Snippet",
+    "SnippetInputSchemaGenerator",
+    "get_snippet_list",
+    "run_snippet",
+    "pretty_print",
 ]

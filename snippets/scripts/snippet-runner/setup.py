@@ -11,8 +11,8 @@ setup(
         "rich>=10.0.0",
     ],
     entry_points={
-        'console_scripts': [
-            'snippet-runner=snippet_runner.cli:main',
+        "console_scripts": [
+            "snippet-runner=snippet_runner.cli:main",
         ],
     },
     python_requires=">=3.8",

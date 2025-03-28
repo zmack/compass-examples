@@ -1,6 +1,14 @@
 """Schema generation utilities for GraphQL types."""
 from typing import Any, Dict, List, Tuple, Set
-from graphql import DocumentNode, OperationDefinitionNode, NamedTypeNode, NonNullTypeNode, ListTypeNode, TypeNode, VariableDefinitionNode
+from graphql import (
+    DocumentNode,
+    OperationDefinitionNode,
+    NamedTypeNode,
+    NonNullTypeNode,
+    ListTypeNode,
+    TypeNode,
+    VariableDefinitionNode,
+)
 
 from .client import Client
 
