@@ -43,7 +43,7 @@ class Snippet:
 
     def validate(self, arguments: object) -> Optional[List[str]]:
         schema = self.generate_validation_schema()
-        return validator.validate(arguments)
+        return Draft4Validator(schema).validate(arguments)
 
     def run(self, arguments: Optional[object] = None) -> None:
         self.parse()

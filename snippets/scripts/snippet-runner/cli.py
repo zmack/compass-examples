@@ -1,12 +1,12 @@
 """Command-line interface for the snippet runner."""
+
 import argparse
 import json
 import os
-import sys
-from typing import Tuple, Optional
+from typing import Tuple
 
 from .client import Client
-from .utils import get_snippet_list, run_snippet, pretty_print
+from .utils import get_snippet_list, run_snippet, pretty_print, pretty_print_markdown
 
 
 def load_environment() -> Tuple[Client, str]:
@@ -82,10 +82,17 @@ def main() -> int:
         "arguments", nargs=1, help="JSON-formatted arguments for the snippet"
     )
 
+    # Peek subcommand
     parser_peek = subparsers.add_parser(
         "peek", help="Display the validation schema for arguments passed to a snippet"
     )
     parser_peek.add_argument("snippet", help="The snippet to display")
+
+    # Help subcommand
+    parser_help = subparsers.add_parser(
+        "help", help="Display the README.md file for a snippet"
+    )
+    parser_help.add_argument("snippet", help="The snippet to show help for")
 
     args = parser.parse_args()
 
@@ -107,6 +114,17 @@ def main() -> int:
         if snippet:
             snippet.parse()
             pretty_print(snippet.generate_validation_schema())
+        else:
+            print(f"Snippet '{args.snippet}' not found")
+    elif args.subcommand == "help":
+        snippets = get_snippet_list(client, snippet_path)
+        snippet = next((s for s in snippets if s.name == args.snippet), None)
+        if snippet:
+            readme_content = snippet.get_readme_content()
+            if readme_content:
+                pretty_print_markdown(readme_content)
+            else:
+                print(f"No README.md found for snippet '{args.snippet}'")
         else:
             print(f"Snippet '{args.snippet}' not found")
     else:

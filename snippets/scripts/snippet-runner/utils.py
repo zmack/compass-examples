@@ -93,3 +93,10 @@ def pretty_print(data: dict) -> None:
     )
     console = Console()
     console.print(syntax)
+
+
+def pretty_print_markdown(data: str) -> None:
+    """Pretty print markdown data with syntax highlighting."""
+    syntax = Syntax(data, "markdown", theme="monokai", line_numbers=False)
+    console = Console()
+    console.print(syntax)

@@ -32,6 +32,9 @@ snippet-runner list
 # View schema for a snippet
 snippet-runner peek <snippet_name>
 
+# View README for a snippet
+snippet-runner help <snippet_name>
+
 # Run a snippet with arguments
 snippet-runner run <snippet_name> '{"arg1": "value1"}'
 ```
@@ -41,6 +44,7 @@ snippet-runner run <snippet_name> '{"arg1": "value1"}'
 # From the scripts directory
 python -m snippet_runner list
 python -m snippet_runner peek <snippet_name>
+python -m snippet_runner help <snippet_name>
 python -m snippet_runner run <snippet_name> '{"arg1": "value1"}'
 ```
 
@@ -64,4 +68,3 @@ source venv/bin/activate
 2. Install in development mode:
 ```bash
 pip install -e ".[dev]"
-```
