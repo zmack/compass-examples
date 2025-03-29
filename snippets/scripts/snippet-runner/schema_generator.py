@@ -110,6 +110,59 @@ class SnippetInputSchemaGenerator:
         """
         Convert GraphQL introspection data to a JSON Schema definition.
         """
+        # Check if this is an enum type first
+        enums = introspection_data.get("data", {}).get("__type", {}).get("enumValues")
+        if enums is not None:
+            enum_values = [ev["name"] for ev in enums]
+            return [], {"type": "string", "enum": enum_values}
+
+        # Process as an object type
+        properties = {}
+        required = []
+        unknown_types = []
+
+        # Process each field in the input type
+        input_fields = (
+            introspection_data.get("data", {}).get("__type", {}).get("inputFields", [])
+        )
+        for field in input_fields:
+            field_name = field["name"]
+            field_type = field["type"]
+
+            new_types, field_schema = self._convert_field_type(field_type)
+
+            # Handle required fields
+            if field_schema.get("required"):
+                required.append(field_name)
+                del field_schema["required"]
+
+            # Add field to properties
+            properties[field_name] = field_schema
+            unknown_types.extend(new_types)
+
+        # Build the final schema
+        definition = {"type": "object", "properties": properties}
+        if required:
+            definition["required"] = required
+
+        # Remove duplicates from unknown types
+        unknown_types = list(set(unknown_types))
+
+        return unknown_types, definition
+
+    def _convert_field_type(self, field_type) -> Tuple[List[str], dict]:
+        """
+        Convert a GraphQL field type to JSON Schema.
+
+        Args:
+            field_type: GraphQL type information from introspection
+
+        Returns:
+            Tuple containing:
+            - List of unknown types that need to be resolved
+            - JSON Schema definition for this field
+        """
+        # Basic type mappings
         type_mapping = {
             "String": {"type": "string"},
             "Int": {"type": "integer"},
@@ -118,77 +171,48 @@ class SnippetInputSchemaGenerator:
             "ID": {"type": "string"},
         }
 
-        def convert_field_type(field_type) -> Tuple[List[str], dict]:
-            unknown_types = []
-            if field_type["name"] in type_mapping.keys():
-                return [], type_mapping[field_type["name"]]
+        unknown_types = []
 
-            kind = field_type.get("kind", None)
+        # Handle basic scalar types
+        if field_type["name"] in type_mapping:
+            return [], type_mapping[field_type["name"]]
 
-            if kind == "SCALAR":
-                return unknown_types, type_mapping.get(
-                    field_type["name"], {"type": "string"}
-                )
+        kind = field_type.get("kind", None)
 
-            elif kind == "NON_NULL":
-                # For NON_NULL, we process the ofType and pass along unknown types
-                child_unknown_types, type_definition = convert_field_type(
-                    field_type["ofType"]
-                )
-                type_definition["required"] = True
-                unknown_types.extend(child_unknown_types)
-                return unknown_types, type_definition
+        # Handle different GraphQL types
+        if kind == "SCALAR":
+            # Default to string for unknown scalar types
+            return [], type_mapping.get(field_type["name"], {"type": "string"})
 
-            elif kind == "LIST":
-                ofType = field_type["ofType"]
-                if ofType["name"] in type_mapping:
-                    return unknown_types, {
-                        "type": "array",
-                        "items": type_mapping[ofType["name"]],
-                    }
-                unknown_types.append(ofType["name"])
+        elif kind == "NON_NULL":
+            # Process non-null types and mark as required
+            child_types, schema = self._convert_field_type(field_type["ofType"])
+            schema["required"] = True
+            unknown_types.extend(child_types)
+            return unknown_types, schema
+
+        elif kind == "LIST":
+            # Process list types
+            of_type = field_type["ofType"]
+            if of_type["name"] in type_mapping:
+                # Known type in the list
+                return [], {
+                    "type": "array",
+                    "items": type_mapping[of_type["name"]],
+                }
+            else:
+                # Unknown type in the list, will need to be resolved
+                unknown_types.append(of_type["name"])
                 return unknown_types, {
                     "type": "array",
-                    "items": {"$ref": f"#/definitions/{ofType['name']}"},
+                    "items": {"$ref": f"#/definitions/{of_type['name']}"},
                 }
 
-            elif kind == "INPUT_OBJECT":
-                unknown_types.append(field_type["name"])
-                return unknown_types, {"$ref": f"#/definitions/{field_type['name']}"}
-            elif kind is None:
-                unknown_types.append(field_type["name"])
-                return unknown_types, {"$ref": f"#/definitions/{field_type['name']}"}
-
+        elif kind == "INPUT_OBJECT" or kind is None:
+            # Reference to another object type
             unknown_types.append(field_type["name"])
             return unknown_types, {"$ref": f"#/definitions/{field_type['name']}"}
 
-        enums = introspection_data.get("data", {}).get("__type", {}).get("enumValues")
-
-        if enums is not None:
-            enum_values = [ev["name"] for ev in enums]
-            return [], {"type": "string", "enum": enum_values}
-
-        properties = {}
-        required = []
-        unknown_types = []
-
-        for field in introspection_data["data"]["__type"]["inputFields"]:
-            field_name = field["name"]
-            field_type = field["type"]
-
-            types, type_definition = convert_field_type(field_type)
-            unknown_types.extend(types)
-            properties[field_name] = type_definition
-            if type_definition.get("required"):
-                required.append(field_name)
-                type_definition.pop("required")
-
-        definition = {"type": "object", "properties": properties}
-
-        if required:
-            definition["required"] = required
-
-        # Remove duplicates from unknown_types
-        unknown_types = list(set(unknown_types))
-
-        return unknown_types, definition
+        # Default case for any other kind
+        unknown_types.append(field_type["name"])
+        return unknown_types, {"$ref": f"#/definitions/{field_type['name']}"}
