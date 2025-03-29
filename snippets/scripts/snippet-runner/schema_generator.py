@@ -1,4 +1,5 @@
 """Schema generation utilities for GraphQL types."""
+
 from typing import Any, Dict, List, Tuple, Set
 from graphql import (
     DocumentNode,
@@ -7,7 +8,6 @@ from graphql import (
     NonNullTypeNode,
     ListTypeNode,
     TypeNode,
-    VariableDefinitionNode,
 )
 
 from .client import Client
@@ -135,6 +135,7 @@ class SnippetInputSchemaGenerator:
                 child_unknown_types, type_definition = convert_field_type(
                     field_type["ofType"]
                 )
+                type_definition["required"] = True
                 unknown_types.extend(child_unknown_types)
                 return unknown_types, type_definition
 
@@ -178,6 +179,9 @@ class SnippetInputSchemaGenerator:
             types, type_definition = convert_field_type(field_type)
             unknown_types.extend(types)
             properties[field_name] = type_definition
+            if type_definition.get("required"):
+                required.append(field_name)
+                type_definition.pop("required")
 
         definition = {"type": "object", "properties": properties}
 
