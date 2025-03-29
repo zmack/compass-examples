@@ -1,4 +1,4 @@
-"""GraphQL snippet runner package."""
+"""GraphQL snippet_runner package."""
 from .client import Client
 from .snippet import Snippet
 from .schema_generator import SnippetInputSchemaGenerator

@@ -1,18 +1,25 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="snippet-runner",
+    name="snippet-runner",  # Distribution name can have hyphens
     version="0.1.0",
-    packages=find_packages(),
+    packages=["snippet_runner"],  # Package name must use underscores
     install_requires=[
         "requests>=2.25.0",
         "graphql-core>=3.2.0",
         "jsonschema>=3.2.0",
         "rich>=10.0.0",
     ],
+    extras_require={
+        "dev": [
+            "pytest>=6.0.0",
+            "pytest-cov>=2.10.0",
+            "black>=20.8b1",
+        ],
+    },
     entry_points={
-        "console_scripts": [
-            "snippet-runner=snippet_runner.cli:main",
+        'console_scripts': [
+            'snippet-runner=snippet_runner.cli:main',  # Use underscore in import path
         ],
     },
     python_requires=">=3.8",

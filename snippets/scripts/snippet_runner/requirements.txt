@@ -2,4 +2,6 @@ gql==3.5.0
 requests==2.32.3
 jsonschema==4.23.0
 rich==13.9.4
-json_repair==0.40.0
+pytest>=6.0.0
+pytest-cov>=2.10.0
+black>=20.8b1
